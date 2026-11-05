@@ -1,22 +1,37 @@
 import { registerPlugin } from '@hubra/plugin-sdk'
-import { IconNote } from '@tabler/icons-react'
-import { NotesScreen } from './NotesScreen'
+import { IconFolders } from '@tabler/icons-react'
+import { DocumentsScreen } from './DocumentsScreen'
+import { searchFiles } from './api'
 import translations from './translations.json'
 
-// Everything here shows only while the module is on for the club and the
-// person has `perm`. Other places to add things: `tabs` (a tab on a built-in
-// screen) and `slots` (account.cards, inventory.item, settings.module.actions).
 registerPlugin({
-  id: 'example',
+  id: 'documents',
   routes: [
+    { path: 'documents', module: 'documents', perm: 'documents.files.read', component: DocumentsScreen },
     {
-      path: 'example',
-      module: 'example',
-      perm: 'example.notes.read',
-      component: NotesScreen,
+      path: 'documents/:folderId',
+      module: 'documents',
+      perm: 'documents.files.read',
+      component: DocumentsScreen,
     },
   ],
-  // The nav entry in hubra_example/__init__.py names this icon.
-  icons: { note: IconNote },
+  search: [
+    {
+      id: 'files',
+      module: 'documents',
+      perm: 'documents.files.read',
+      label: 'shell.searchKind.documents',
+      load: async () =>
+        (await searchFiles('')).map((d) => ({
+          id: d.id,
+          label: d.name,
+          sub: d.folderName ?? undefined,
+          keywords: d.description ?? undefined,
+          path: d.folderId ? `/app/documents/${d.folderId}` : '/app/documents',
+        })),
+    },
+  ],
+  // The nav entry in hubra_documents/__init__.py names this icon.
+  icons: { folders: IconFolders },
   translations,
 })
