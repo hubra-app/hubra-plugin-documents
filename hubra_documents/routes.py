@@ -23,8 +23,8 @@ import re
 from flask import Blueprint, jsonify, request, send_file
 from sqlalchemy import func, select
 
-from hubra.api.auth.helpers import get_current_member
-from hubra.api.permissions import member_has_permission, permission_required
+from hubra.core.auth.helpers import get_current_member
+from hubra.core.permissions import member_has_permission, permission_required
 from hubra.core.utils import log_audit
 from hubra.core import files as store
 from hubra.core.errors import api_error
