@@ -12,6 +12,18 @@ PUT    /files/<id>/content          multipart: file (a new version replaces the 
 GET    /files/<id>/download[?inline=1]
 DELETE /files/<id>
 GET    /access-options              roles and groups to choose from
+
+Photo albums (folders of the kind "album", hubra_documents/photos.py):
+GET    /albums                      albums open to me, newest first, with cover
+POST   /folders                     {kind: "album", name, takenOn?, membersUpload?, …}
+POST   /folders/<id>/photos         multipart: photos (up to 20)
+GET    /files/<id>/thumb            a photo's thumbnail
+PATCH  /photos/<id>                 {caption}: the uploader or a folder manager
+DELETE /photos/<id>                 the uploader or a folder manager
+PUT    /files/<id>/tags             {memberIds}: who is on the photo
+DELETE /files/<id>/tags/me          untag myself
+GET    /photo-consent               may others tag me
+PUT    /photo-consent               {allowed}: "no" removes my tags
 """
 
 from __future__ import annotations
@@ -93,10 +105,22 @@ class Access:
             )
         return self._open[folder_id]
 
+    def may_upload(self, folder: DocumentFolder | None) -> bool:
+        """Writers anywhere they can open; every reader into an album that
+        lets members add photos."""
+        if folder is not None and not self.can_open(folder.id):
+            return False
+        if self.writer:
+            return True
+        return bool(folder is not None and folder.kind == "album" and folder.members_upload)
+
     def may_change(self, doc: DocumentFile) -> bool:
         if self.manager:
             return True
-        return bool(self.writer and self.member and doc.uploaded_by == self.member.id)
+        if not (self.member and doc.uploaded_by == self.member.id):
+            return False
+        folder = self.folders.get(doc.folder_id) if doc.folder_id else None
+        return self.writer or bool(folder and folder.kind == "album" and folder.members_upload)
 
 
 def _folder_dict(f: DocumentFolder, counts: dict[int, int] | None = None) -> dict:
@@ -109,6 +133,10 @@ def _folder_dict(f: DocumentFolder, counts: dict[int, int] | None = None) -> dic
         "groupIds": list(f.group_ids or []),
         "restricted": bool(f.role_ids or f.group_ids),
         "fileCount": (counts or {}).get(f.id, 0),
+        "kind": f.kind or "files",
+        "takenOn": f.taken_on.isoformat() if f.taken_on else None,
+        "membersUpload": bool(f.members_upload),
+        "coverFileId": f.cover_file_id,
     }
 
 
@@ -127,6 +155,9 @@ def _file_dict(
         "createdAt": d.created_at.isoformat() if d.created_at else None,
         "updatedAt": d.updated_at.isoformat() if d.updated_at else None,
         "canChange": acc.may_change(d),
+        "isPhoto": d.thumb_key is not None,
+        "width": d.width,
+        "height": d.height,
     }
 
 
@@ -171,9 +202,33 @@ def _ids(value, known: set[int]) -> list[int] | None:
 
 
 def _folder_fields(body: dict, folder: DocumentFolder | None, acc: Access):
-    """Apply {name, description, parentId, roleIds, groupIds} to *folder* (a
-    new one when None); returns the folder, or an error response."""
+    """Apply {name, description, parentId, roleIds, groupIds, and for an
+    album takenOn, membersUpload, coverFileId} to *folder* (a new one when
+    None; ``kind`` only then); returns the folder, or an error response."""
+    from datetime import date
+
     target = folder or DocumentFolder()
+    if folder is None:
+        kind = body.get("kind") or "files"
+        if kind not in ("files", "album"):
+            return api_error("VALIDATION_ERROR", "kind: files or album", 400)
+        target.kind = kind
+        target.members_upload = True
+    if "takenOn" in body:
+        raw = body.get("takenOn")
+        try:
+            target.taken_on = date.fromisoformat(raw) if raw else None
+        except (TypeError, ValueError):
+            return api_error("VALIDATION_ERROR", "takenOn: a date like 2026-11-10", 400)
+    if "membersUpload" in body:
+        target.members_upload = bool(body.get("membersUpload"))
+    if "coverFileId" in body:
+        cover = body.get("coverFileId")
+        if cover is not None:
+            doc = db.session.get(DocumentFile, cover) if isinstance(cover, int) else None
+            if doc is None or folder is None or doc.folder_id != folder.id:
+                return api_error("VALIDATION_ERROR", "coverFileId: not a photo of this album", 400)
+        target.cover_file_id = cover
     if "name" in body or folder is None:
         name = _clean_name(body.get("name"), 120)
         if not name:
@@ -263,14 +318,25 @@ def get_folder(folder_id: int):
         return api_error("NOT_FOUND", "no such folder", 404)
     counts = _counts()
     folder = acc.folders[folder_id]
+    album = folder.kind == "album"
     docs = list(
         db.session.scalars(
             select(DocumentFile)
             .where(DocumentFile.folder_id == folder_id)
-            .order_by(func.lower(DocumentFile.name))
+            # An album in the order the photos came, a folder by name.
+            .order_by(
+                *(
+                    (DocumentFile.created_at, DocumentFile.id)
+                    if album
+                    else (func.lower(DocumentFile.name),)
+                )
+            )
         )
     )
-    names = _member_names({d.uploaded_by for d in docs if d.uploaded_by})
+    tags = photos.tags_of(docs) if album else {}
+    names = _member_names(
+        {d.uploaded_by for d in docs if d.uploaded_by} | {m for ms in tags.values() for m in ms}
+    )
     path = []
     walk = folder.parent_id
     while walk is not None:
@@ -285,8 +351,15 @@ def get_folder(folder_id: int):
                 for f in sorted(acc.folders.values(), key=lambda f: f.name.lower())
                 if f.parent_id == folder_id and acc.can_open(f.id)
             ],
-            "files": [_file_dict(d, acc, names) for d in docs],
+            "files": [
+                {**_file_dict(d, acc, names), **photos.tag_dict(d, tags, names)}
+                if album
+                else _file_dict(d, acc, names)
+                for d in docs
+            ],
             "canWrite": acc.writer,
+            "canUpload": acc.may_upload(folder),
+            "memberId": _actor(acc),
             "canManage": acc.manager,
         }
     ), 200
@@ -333,13 +406,17 @@ def delete_folder(folder_id: int):
     folder = acc.folders.get(folder_id)
     if folder is None:
         return api_error("NOT_FOUND", "no such folder", 404)
-    has_files = db.session.scalar(
-        select(func.count())
-        .select_from(DocumentFile)
-        .where(DocumentFile.folder_id == folder_id)
+    files = list(
+        db.session.scalars(select(DocumentFile).where(DocumentFile.folder_id == folder_id))
     )
-    if has_files or any(f.parent_id == folder_id for f in acc.folders.values()):
+    if any(f.parent_id == folder_id for f in acc.folders.values()) or (
+        files and folder.kind != "album"
+    ):
         return api_error("FOLDER_NOT_EMPTY", "move or delete what is in it first", 409)
+    # An album goes with its photos.
+    for doc in files:
+        _drop_files(doc)
+        db.session.delete(doc)
     log_audit(
         _actor(acc), "documents.folder.delete", "DocumentFolder", folder.id, folder.name
     )
@@ -362,6 +439,16 @@ def access_options():
 
 
 # ── Files ────────────────────────────────────────────────────────────────────
+
+
+def _drop_files(doc: DocumentFile) -> None:
+    """The file (and a photo's thumbnail) out of the store."""
+    for key in (doc.file_key, doc.thumb_key):
+        if key:
+            try:
+                store.remove(key)
+            except store.FileNotFound:
+                pass
 
 
 def _visible_file(file_id: int, acc: Access) -> DocumentFile | None:
@@ -520,11 +607,14 @@ def delete_file(file_id: int):
         return api_error("NOT_FOUND", "no such file", 404)
     if not acc.may_change(doc):
         return api_error("FORBIDDEN", "only the uploader or a folder manager", 403)
-    try:
-        store.remove(doc.file_key)
-    except store.FileNotFound:
-        pass
+    _drop_files(doc)
+    folder = acc.folders.get(doc.folder_id) if doc.folder_id else None
+    if folder is not None and folder.cover_file_id == doc.id:
+        folder.cover_file_id = None
     log_audit(_actor(acc), "documents.file.delete", "DocumentFile", doc.id, doc.name)
     db.session.delete(doc)
     db.session.commit()
     return "", 204
+
+
+from . import photos  # noqa: E402,F401  (registers the album routes)

@@ -1,10 +1,25 @@
-"""Folders and files (one copy per club schema)."""
+"""Folders and files, photo albums and their photos (one copy per club schema).
+
+A photo album is a folder of the kind "album": the same access per role and
+group, its files are photos with a thumbnail and the members shown on them.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hubra.core.extensions import db
@@ -33,6 +48,15 @@ class DocumentFolder(db.Model):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
+    # "files", or "album": a photo album (Fotos), shown as a grid.
+    kind: Mapped[str] = mapped_column(String(10), nullable=False, default="files")
+    taken_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Album: every member who may open it adds photos, not only writers.
+    members_upload: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    cover_file_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Where it came from when taken over ("community.album:12"), so a
+    # take-over that runs twice doesn't copy it twice.
+    source: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
 
 
 class DocumentFile(db.Model):
@@ -58,4 +82,38 @@ class DocumentFile(db.Model):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+    # Photos in an album: re-encoded without EXIF, plus a thumbnail.
+    thumb_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+
+
+class DocumentPhotoTag(db.Model):
+    """A member shown on a photo."""
+
+    __tablename__ = "documents_photo_tags"
+    __table_args__ = (UniqueConstraint("file_id", "member_id", name="uq_documents_photo_tag"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("documents_files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("members.id", ondelete="CASCADE"), nullable=False
+    )
+
+
+class DocumentPhotoOptout(db.Model):
+    """A member who doesn't want to be tagged in photos."""
+
+    __tablename__ = "documents_photo_optouts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("members.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
     )
