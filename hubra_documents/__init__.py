@@ -16,6 +16,9 @@ from hubra.core.modules import Blueprint, Module, NavItem
 
 module = Module(
     code="documents",
+    # Access the standard roles get when a club first switches it on
+    # (docs/roles.md in hubra-app/hubra).
+    role_defaults={"board": "edit", "secretary": "all"},
     name="Documents",
     description="Document library with folders and access per role or group",
     default_enabled=False,
