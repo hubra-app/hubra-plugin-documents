@@ -1,5 +1,12 @@
 # Documents
 
+## Unreleased
+
+- **Photo albums (Fotos).** Albums move here from the Community plugin. An album is a folder of the kind *album*, with the same access per role and group as any folder. The new *Fotos* view next to the documents (`/app/documents?view=photos`) shows the albums and their photos in a grid. Photos are re-encoded without EXIF and get thumbnails; each has a caption and a cover choice. Members can be tagged on a photo, untag themselves, or turn off *Fotos von mir*. An album may let every member who can see it add photos.
+- The albums from Community are taken over by the job `documents-take-over-albums` through Community's contracts (`community.albums.export`, `community.photos.optouts`). Photos are copied in the file store, with captions, tags, covers and opt-outs. Each album is taken once.
+- New clubs: the Mitglied role gets *Ansehen*, so members see the folders open to everyone and the albums. Existing clubs give members access under Einstellungen › Rollen if they should see the photos.
+- Run `flask db upgrade` after updating.
+
 ## 1.1.0
 
 - Gives the standard roles access when a club first switches it on (`role_defaults`, docs/roles.md in hubra-app/hubra): Vorstand Bearbeiten, Aktuar/in Alles. Roles without access don't see it; their own data from it stays on their profile. Needs Hubra 0.2.5 or later.

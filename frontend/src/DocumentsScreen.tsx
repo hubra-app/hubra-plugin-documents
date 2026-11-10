@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ActionIcon,
@@ -16,6 +16,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -31,6 +32,8 @@ import {
   IconFolder,
   IconFolderPlus,
   IconLock,
+  IconPencil,
+  IconTrash,
   IconPhoto,
   IconSearch,
   IconUpload,
@@ -67,6 +70,7 @@ import {
   type Folder,
   type Library,
 } from './api'
+import { AlbumView, PhotosView } from './Photos'
 
 function fileIcon(type: string) {
   if (type === 'application/pdf') return <IconFileTypePdf size={18} />
@@ -85,6 +89,9 @@ export function DocumentsScreen() {
   const qc = useQueryClient()
   const params = useParams()
   const folderId = params.folderId ? Number(params.folderId) : null
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Fotos: the photo albums, a view of their own next to the documents.
+  const photos = folderId === null && searchParams.get('view') === 'photos'
   const [q, setQ] = useState('')
   const [search, setSearch] = useState('')
   useEffect(() => {
@@ -105,7 +112,7 @@ export function DocumentsScreen() {
   })
 
   const [upload, setUpload] = useState(false)
-  const [folderForm, setFolderForm] = useState<Folder | 'new' | null>(null)
+  const [folderForm, setFolderForm] = useState<Folder | 'new' | 'album' | null>(null)
   const [fileForm, setFileForm] = useState<DocFile | null>(null)
   const [newVersion, setNewVersion] = useState<DocFile | null>(null)
   const [deleting, setDeleting] = useState<{ kind: 'file'; item: DocFile } | { kind: 'folder'; item: Folder } | null>(null)
@@ -115,7 +122,11 @@ export function DocumentsScreen() {
   const loading = folderId === null ? library.isLoading : folder.isLoading
   const error = folderId === null ? library.error : folder.error
   const allFolders = library.data?.folders ?? []
-  const subfolders = folderId === null ? allFolders.filter((f) => f.parentId === null) : (view?.folders ?? [])
+  // Albums are under Fotos, not between the folders.
+  const subfolders = (folderId === null ? allFolders.filter((f) => f.parentId === null) : (view?.folders ?? [])).filter(
+    (f) => f.kind !== 'album',
+  )
+  const album = folderId !== null && folder.data?.folder.kind === 'album' ? folder.data : null
   const canWrite = !!view?.canWrite
   const canManage = !!view?.canManage
 
@@ -129,7 +140,13 @@ export function DocumentsScreen() {
       else await deleteFolder(deleting.item.id)
       notify('success', t('documents.deleted'))
       if (deleting.kind === 'folder' && deleting.item.id === folderId) {
-        navigate(deleting.item.parentId ? `/app/documents/${deleting.item.parentId}` : '/app/documents')
+        navigate(
+          deleting.item.kind === 'album'
+            ? '/app/documents?view=photos'
+            : deleting.item.parentId
+              ? `/app/documents/${deleting.item.parentId}`
+              : '/app/documents',
+        )
       }
       refresh()
     } catch (err) {
@@ -146,6 +163,24 @@ export function DocumentsScreen() {
         title={title}
         desc={folderId !== null ? (folder.data?.folder.description ?? undefined) : t('documents.desc')}
         actions={
+          album ? (
+            canManage ? (
+              <Group gap="xs">
+                <Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setFolderForm(album.folder)}>
+                  {t('documents.photos.editAlbum')}
+                </Button>
+                <ActionIcon
+                  variant="default"
+                  size="lg"
+                  color="red"
+                  aria-label={t('documents.photos.deleteAlbum')}
+                  onClick={() => setDeleting({ kind: 'folder', item: album.folder })}
+                >
+                  <IconTrash size={16} />
+                </ActionIcon>
+              </Group>
+            ) : undefined
+          ) : photos ? undefined : (
           <Group gap="xs">
             {canManage && (
               <Button variant="default" leftSection={<IconFolderPlus size={16} />} onClick={() => setFolderForm('new')}>
@@ -158,13 +193,14 @@ export function DocumentsScreen() {
               </Button>
             )}
           </Group>
+          )
         }
       />
       <Stack gap="md">
         <Group justify="space-between" wrap="wrap" gap="sm">
           <Breadcrumbs separatorMargin={6} style={{ flexWrap: 'wrap' }}>
-            <Anchor component="button" onClick={() => navigate('/app/documents')}>
-              {t('documents.title')}
+            <Anchor component="button" onClick={() => navigate(album ? '/app/documents?view=photos' : '/app/documents')}>
+              {album ? t('documents.photos.title') : t('documents.title')}
             </Anchor>
             {folder.data?.path.map((p) => (
               <Anchor key={p.id} component="button" onClick={() => navigate(`/app/documents/${p.id}`)}>
@@ -173,6 +209,17 @@ export function DocumentsScreen() {
             ))}
             {folderId !== null && folder.data && <Text size="sm">{folder.data.folder.name}</Text>}
           </Breadcrumbs>
+          {folderId === null && (
+            <SegmentedControl
+              value={photos ? 'photos' : 'files'}
+              onChange={(v) => setSearchParams(v === 'photos' ? { view: 'photos' } : {}, { replace: true })}
+              data={[
+                { value: 'files', label: t('documents.title') },
+                { value: 'photos', label: t('documents.photos.title') },
+              ]}
+            />
+          )}
+          {!photos && !album && (
           <TextInput
             leftSection={<IconSearch size={16} />}
             placeholder={t('documents.search')}
@@ -181,12 +228,17 @@ export function DocumentsScreen() {
             w={{ base: '100%', xs: 260 }}
             aria-label={t('documents.search')}
           />
+          )}
         </Group>
 
-        {error ? (
+        {photos ? (
+          <PhotosView onNewAlbum={() => setFolderForm('album')} />
+        ) : error ? (
           <ErrorBanner message={errorText(error)} onRetry={refresh} />
         ) : loading ? (
           <LoadingSpinner />
+        ) : album ? (
+          <AlbumView view={album} />
         ) : search ? (
           <FileTable
             files={results.data ?? []}
@@ -242,8 +294,9 @@ export function DocumentsScreen() {
       />
       {folderForm && (
         <FolderModal
-          folder={folderForm === 'new' ? null : folderForm}
-          parentId={folderForm === 'new' ? folderId : folderForm.parentId}
+          folder={folderForm === 'new' || folderForm === 'album' ? null : folderForm}
+          album={folderForm === 'album' || (typeof folderForm === 'object' && folderForm.kind === 'album')}
+          parentId={folderForm === 'new' ? folderId : folderForm === 'album' ? null : folderForm.parentId}
           folders={allFolders}
           onClose={() => setFolderForm(null)}
           onDone={refresh}
@@ -262,7 +315,13 @@ export function DocumentsScreen() {
         title={t(deleting?.kind === 'folder' ? 'documents.deleteFolderTitle' : 'documents.deleteFileTitle', {
           name: deleting?.item.name ?? '',
         })}
-        body={deleting?.kind === 'folder' ? t('documents.deleteFolderBody') : t('documents.deleteFileBody')}
+        body={
+          deleting?.kind === 'folder'
+            ? deleting.item.kind === 'album'
+              ? t('documents.photos.deleteAlbumBody')
+              : t('documents.deleteFolderBody')
+            : t('documents.deleteFileBody')
+        }
       />
     </>
   )
@@ -554,12 +613,15 @@ function folderOptions(folders: Folder[], exclude?: number) {
 
 function FolderModal({
   folder,
+  album = false,
   parentId,
   folders,
   onClose,
   onDone,
 }: {
   folder: Folder | null
+  /** A photo album: a date and "members add photos" instead of a parent. */
+  album?: boolean
   parentId: number | null
   folders: Folder[]
   onClose: () => void
@@ -574,6 +636,8 @@ function FolderModal({
   const [mode, setMode] = useState(folder?.restricted ? 'some' : 'all')
   const [roles, setRoles] = useState<string[]>((folder?.roleIds ?? []).map(String))
   const [groups, setGroups] = useState<string[]>((folder?.groupIds ?? []).map(String))
+  const [takenOn, setTakenOn] = useState(folder?.takenOn ?? '')
+  const [membersUpload, setMembersUpload] = useState(folder?.membersUpload ?? true)
   const [busy, setBusy] = useState(false)
   const parents = useMemo(() => folderOptions(folders, folder?.id), [folders, folder?.id])
 
@@ -582,9 +646,11 @@ function FolderModal({
     const body = {
       name: name.trim(),
       description: description.trim() || null,
-      parentId: parent ? Number(parent) : null,
       roleIds: mode === 'some' ? roles.map(Number) : [],
       groupIds: mode === 'some' ? groups.map(Number) : [],
+      ...(album
+        ? { takenOn: takenOn || null, membersUpload, ...(folder ? {} : { kind: 'album' as const }) }
+        : { parentId: parent ? Number(parent) : null }),
     }
     try {
       if (folder) await updateFolder(folder.id, body)
@@ -603,7 +669,15 @@ function FolderModal({
       open
       wide
       onClose={onClose}
-      title={folder ? t('documents.editFolder') : t('documents.newFolder')}
+      title={
+        album
+          ? folder
+            ? t('documents.photos.editAlbum')
+            : t('documents.photos.newAlbum')
+          : folder
+            ? t('documents.editFolder')
+            : t('documents.newFolder')
+      }
       onSubmit={(e) => {
         e?.preventDefault()
         void submit()
@@ -627,15 +701,32 @@ function FolderModal({
         value={description}
         onChange={(e) => setDescription(e.currentTarget.value)}
       />
-      <Select
-        label={t('documents.parent')}
-        placeholder={t('documents.topLevel')}
-        clearable
-        searchable
-        data={parents}
-        value={parent}
-        onChange={setParent}
-      />
+      {album ? (
+        <>
+          <TextInput
+            type="date"
+            label={t('documents.photos.takenOn')}
+            value={takenOn}
+            onChange={(e) => setTakenOn(e.currentTarget.value)}
+          />
+          <Switch
+            checked={membersUpload}
+            onChange={(e) => setMembersUpload(e.currentTarget.checked)}
+            label={t('documents.photos.membersUpload')}
+            description={t('documents.photos.membersUploadHint')}
+          />
+        </>
+      ) : (
+        <Select
+          label={t('documents.parent')}
+          placeholder={t('documents.topLevel')}
+          clearable
+          searchable
+          data={parents}
+          value={parent}
+          onChange={setParent}
+        />
+      )}
       <Field label={t('documents.access')} hint={t('documents.accessHint')}>
         <SegmentedControl
           fullWidth

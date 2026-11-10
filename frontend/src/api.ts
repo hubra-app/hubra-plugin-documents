@@ -9,6 +9,12 @@ export interface Folder {
   groupIds: number[]
   restricted: boolean
   fileCount: number
+  /** "album": a photo album (Fotos). */
+  kind: 'files' | 'album'
+  takenOn: string | null
+  membersUpload: boolean
+  coverFileId: number | null
+  canUpload?: boolean
 }
 
 export interface DocFile {
@@ -24,6 +30,12 @@ export interface DocFile {
   createdAt: string | null
   updatedAt: string | null
   canChange: boolean
+  isPhoto: boolean
+  width: number | null
+  height: number | null
+  /** In an album: the caption (the description) and who is on it. */
+  caption?: string | null
+  tags?: { memberId: number; name: string }[]
 }
 
 export interface Library {
@@ -36,6 +48,8 @@ export interface Library {
 export interface FolderView extends Library {
   folder: Folder
   path: { id: number; name: string }[]
+  canUpload: boolean
+  memberId: number | null
 }
 
 export interface AccessOptions {
@@ -49,6 +63,10 @@ export interface FolderInput {
   parentId?: number | null
   roleIds?: number[]
   groupIds?: number[]
+  kind?: 'files' | 'album'
+  takenOn?: string | null
+  membersUpload?: boolean
+  coverFileId?: number | null
 }
 
 const BASE = '/app/documents'
@@ -60,6 +78,41 @@ export const QK = {
   folder: (id: number) => ['documents', 'folder', id] as const,
   search: (q: string) => ['documents', 'search', q] as const,
   options: ['documents', 'access-options'] as const,
+  albums: ['documents', 'albums'] as const,
+  consent: ['documents', 'photo-consent'] as const,
+  image: (id: number, size: 'thumb' | 'full') => ['documents', 'image', id, size] as const,
+}
+
+// ── Photo albums ──
+
+export const listAlbums = () => apiFetch<{ albums: Folder[]; canManage: boolean }>(`${BASE}/albums`)
+export const getConsent = () => apiFetch<{ photosOfMe: boolean }>(`${BASE}/photo-consent`)
+export const setConsent = (allowed: boolean) =>
+  apiFetch<{ photosOfMe: boolean }>(`${BASE}/photo-consent`, {
+    method: 'PUT',
+    headers: json,
+    body: JSON.stringify({ allowed }),
+  })
+
+export async function uploadPhotos(albumId: number, files: File[]) {
+  const form = new FormData()
+  for (const f of files) form.append('photos', f)
+  const res = await apiFetchRaw(`${BASE}/folders/${albumId}/photos`, { method: 'POST', body: form })
+  return (await res.json()) as { added: DocFile[]; failed: { name: string; reason: string }[] }
+}
+
+export const updatePhoto = (id: number, body: { caption: string | null }) =>
+  apiFetch<DocFile>(`${BASE}/photos/${id}`, { method: 'PATCH', headers: json, body: JSON.stringify(body) })
+export const deletePhoto = (id: number) => apiFetch<void>(`${BASE}/photos/${id}`, { method: 'DELETE' })
+export const setTags = (id: number, memberIds: number[]) =>
+  apiFetch<void>(`${BASE}/files/${id}/tags`, { method: 'PUT', headers: json, body: JSON.stringify({ memberIds }) })
+export const untagMe = (id: number) => apiFetch<void>(`${BASE}/files/${id}/tags/me`, { method: 'DELETE' })
+
+/** A photo as an object URL (the request needs the session, so no plain src). */
+export async function photoUrl(id: number, size: 'thumb' | 'full') {
+  const path = size === 'thumb' ? `${BASE}/files/${id}/thumb` : `${BASE}/files/${id}/download?inline=1`
+  const res = await apiFetchRaw(path)
+  return URL.createObjectURL(await res.blob())
 }
 
 export const getLibrary = () => apiFetch<Library>(`${BASE}/library`)
