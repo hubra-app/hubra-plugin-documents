@@ -1,12 +1,9 @@
 # Documents
 
-## Unreleased
-
-- Dashboard widget **Neueste Dokumente**: the files changed last, only from folders the member may open (needs `documents.files.read`).
-
 ## 1.1.0
 
 - Gives the standard roles access when a club first switches it on (`role_defaults`, docs/roles.md in hubra-app/hubra): Vorstand Bearbeiten, Aktuar/in Alles. Roles without access don't see it; their own data from it stays on their profile. Needs Hubra 0.2.5 or later.
+- Dashboard widget **Neueste Dokumente**: the files changed last, only from folders the member may open (needs `documents.files.read`).
 
 ## 1.0.0
 
