@@ -55,8 +55,8 @@ INLINE_TYPES = {
 class Access:
     """What the signed-in member may open, worked out once per request."""
 
-    def __init__(self) -> None:
-        self.member = get_current_member()
+    def __init__(self, member=None) -> None:
+        self.member = member if member is not None else get_current_member()
         self.manager = member_has_permission(self.member, MANAGE)
         self.writer = self.manager or member_has_permission(
             self.member, "documents.files.write"

@@ -217,3 +217,27 @@ def test_the_plugin_loads_within_its_limits(app):
         spec = loader.current().get("documents")
     assert spec is not None and spec.loaded, spec and spec.error
     assert spec.manifest.get("uses") is not None
+
+
+# ── Dashboard widgets ───────────────────────────────────────────────────────
+
+
+def test_recent_widget(client, db, lib):
+    from sqlalchemy import select
+
+    from hubra.core import contracts
+    from hubra.core.models.member import Member
+    from hubra.core.models.user import User
+
+    _upload(client, "Statuten.pdf", folder=lib["allg"])
+
+    def member(email):
+        return db.session.scalar(select(Member).join(User).where(User.email == email))
+
+    vera = contracts.widget_data("documents.recent", {}, actor=member("vera@test.ch"))
+    assert [i["label"] for i in vera["items"]] == ["Statuten.pdf", "Budget.pdf"]
+    assert vera["items"][1]["sub"].startswith("Finanzen · ")
+    assert vera["items"][1]["path"] == f"/app/documents/{lib['finanzen']}"
+    # Rita may not open Finanzen: the budget stays hidden.
+    rita = contracts.widget_data("documents.recent", {}, actor=member("rita@test.ch"))
+    assert [i["label"] for i in rita["items"]] == ["Statuten.pdf"]

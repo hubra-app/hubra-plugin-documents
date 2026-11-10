@@ -1,8 +1,12 @@
 {
   "en-GB": {
     "shell": {
-      "nav": { "documents": "Documents" },
-      "searchKind": { "documents": "Document" }
+      "nav": {
+        "documents": "Documents"
+      },
+      "searchKind": {
+        "documents": "Document"
+      }
     },
     "roles": {
       "perms": {
@@ -60,13 +64,22 @@
       "deleteFileTitle": "Delete «{{name}}»?",
       "deleteFileBody": "The file is deleted for good.",
       "deleteFolderTitle": "Delete the folder «{{name}}»?",
-      "deleteFolderBody": "Only an empty folder can be deleted. Move or delete its files and subfolders first."
+      "deleteFolderBody": "Only an empty folder can be deleted. Move or delete its files and subfolders first.",
+      "widget": {
+        "recent": "Latest documents",
+        "recentHint": "The files changed last, from folders you may open",
+        "count": "How many"
+      }
     }
   },
   "de-CH": {
     "shell": {
-      "nav": { "documents": "Dokumente" },
-      "searchKind": { "documents": "Dokument" }
+      "nav": {
+        "documents": "Dokumente"
+      },
+      "searchKind": {
+        "documents": "Dokument"
+      }
     },
     "roles": {
       "perms": {
@@ -124,7 +137,12 @@
       "deleteFileTitle": "«{{name}}» löschen?",
       "deleteFileBody": "Die Datei wird endgültig gelöscht.",
       "deleteFolderTitle": "Ordner «{{name}}» löschen?",
-      "deleteFolderBody": "Nur ein leerer Ordner lässt sich löschen. Verschiebe oder lösche zuerst seine Dateien und Unterordner."
+      "deleteFolderBody": "Nur ein leerer Ordner lässt sich löschen. Verschiebe oder lösche zuerst seine Dateien und Unterordner.",
+      "widget": {
+        "recent": "Neueste Dokumente",
+        "recentHint": "Die zuletzt geänderten Dateien aus Ordnern, die du öffnen darfst",
+        "count": "Wie viele"
+      }
     }
   }
 }

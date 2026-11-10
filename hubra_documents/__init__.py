@@ -12,6 +12,7 @@ Permissions:
     documents.folders.manage folders and their access, every file, every folder
 """
 
+from hubra.core.contracts import WidgetField, widget_contract
 from hubra.core.modules import Blueprint, Module, NavItem
 
 module = Module(
@@ -41,4 +42,17 @@ module = Module(
         ),
     ),
     tables=("documents_folders", "documents_files"),
+    # Dashboard widget (hubra_documents/widgets.py).
+    provides=(
+        widget_contract(
+            "documents.recent",
+            "hubra_documents.widgets:recent",
+            label="documents.widget.recent",
+            description="documents.widget.recentHint",
+            size="m",
+            view="list",
+            perm="documents.files.read",
+            fields=(WidgetField("count", "documents.widget.count", "number", 5),),
+        ),
+    ),
 )
