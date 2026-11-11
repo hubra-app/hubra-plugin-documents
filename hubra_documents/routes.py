@@ -29,6 +29,7 @@ PUT    /photo-consent               {allowed}: "no" removes my tags
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 
@@ -47,9 +48,13 @@ from hubra.core.models.role import Role
 from .models import DocumentFile, DocumentFolder
 
 documents_bp = Blueprint("documents_bp", __name__)
+log = logging.getLogger(__name__)
 
 OWNER = "documents"
 MANAGE = "documents.folders.manage"
+# Adds photos to an album that lets members do so ("membersUpload"), without
+# the right to upload documents. An "edit" right: roles get it on purpose.
+ADD_PHOTOS = "documents.photos.add"
 # Shown in the browser only these; anything else (HTML, SVG …) downloads.
 INLINE_TYPES = {
     "application/pdf",
@@ -73,6 +78,7 @@ class Access:
         self.writer = self.manager or member_has_permission(
             self.member, "documents.files.write"
         )
+        self.photo_adder = self.writer or member_has_permission(self.member, ADD_PHOTOS)
         self.role_ids = {r.id for r in (self.member.roles if self.member else [])}
         self.group_ids = (
             set(
@@ -106,13 +112,18 @@ class Access:
         return self._open[folder_id]
 
     def may_upload(self, folder: DocumentFolder | None) -> bool:
-        """Writers anywhere they can open; every reader into an album that
-        lets members add photos."""
+        """Writers anywhere they can open; holders of documents.photos.add
+        into an album that lets members add photos."""
         if folder is not None and not self.can_open(folder.id):
             return False
         if self.writer:
             return True
-        return bool(folder is not None and folder.kind == "album" and folder.members_upload)
+        return bool(
+            self.photo_adder
+            and folder is not None
+            and folder.kind == "album"
+            and folder.members_upload
+        )
 
     def may_change(self, doc: DocumentFile) -> bool:
         if self.manager:
@@ -120,7 +131,9 @@ class Access:
         if not (self.member and doc.uploaded_by == self.member.id):
             return False
         folder = self.folders.get(doc.folder_id) if doc.folder_id else None
-        return self.writer or bool(folder and folder.kind == "album" and folder.members_upload)
+        return self.writer or bool(
+            self.photo_adder and folder and folder.kind == "album" and folder.members_upload
+        )
 
 
 def _folder_dict(f: DocumentFolder, counts: dict[int, int] | None = None) -> dict:
@@ -196,7 +209,9 @@ def _clean_name(raw: str, limit: int) -> str:
 def _ids(value, known: set[int]) -> list[int] | None:
     if value is None:
         return []
-    if not isinstance(value, list) or not all(isinstance(v, int) for v in value):
+    if not isinstance(value, list) or not all(
+        isinstance(v, int) and not isinstance(v, bool) for v in value
+    ):
         return None
     return sorted({v for v in value if v in known})
 
@@ -261,7 +276,42 @@ def _folder_fields(body: dict, folder: DocumentFolder | None, acc: Access):
     return target
 
 
+def _tenant():
+    from hubra.core.tenant.context import current_tenant
+
+    return current_tenant()
+
+
+def storage_full():
+    """An error response while the club is at or over its storage limit
+    (``storage_mb``: plan or club's own; none means no limit), else None.
+    The limit is soft elsewhere; here it stops new files."""
+    from hubra.core.services import quotas
+
+    tenant = _tenant()
+    if tenant is None:
+        return None
+    try:
+        limit = quotas.limits_for(tenant).get("storage_mb")
+        if not limit:
+            return None
+        used = quotas.usage([tenant])[tenant.id]["storage_mb"]
+    except Exception:  # noqa: BLE001 - a failed count never blocks uploads
+        log.warning("documents: storage usage unavailable", exc_info=True)
+        return None
+    if used < limit:
+        return None
+    return api_error(
+        "STORAGE_FULL",
+        f"the club's storage is full ({used} of {limit} MB); delete files or ask "
+        "the club's owners to raise the limit",
+        507,
+    )
+
+
 def _upload():
+    if (full := storage_full()) is not None:
+        return None, full
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         return None, api_error("VALIDATION_ERROR", "file is required", 400)
@@ -465,10 +515,13 @@ def search_files():
     q = str(request.args.get("q") or "").strip()
     stmt = select(DocumentFile).order_by(DocumentFile.updated_at.desc()).limit(500)
     if q:
-        like = f"%{q.lower()}%"
+        # % and _ in the search are letters, not wildcards.
+        like = "%" + re.sub(r"([\\%_])", r"\\\1", q.lower()[:200]) + "%"
         stmt = stmt.where(
-            func.lower(DocumentFile.name).like(like)
-            | func.lower(func.coalesce(DocumentFile.description, "")).like(like)
+            func.lower(DocumentFile.name).like(like, escape="\\")
+            | func.lower(func.coalesce(DocumentFile.description, "")).like(
+                like, escape="\\"
+            )
         )
     docs = [d for d in db.session.scalars(stmt) if acc.can_open(d.folder_id)][:100]
     names = _member_names({d.uploaded_by for d in docs if d.uploaded_by})
@@ -518,23 +571,54 @@ def replace_file(file_id: int):
         return api_error("NOT_FOUND", "no such file", 404)
     if not acc.may_change(doc):
         return api_error("FORBIDDEN", "only the uploader or a folder manager", 403)
-    uploaded, error = _upload()
-    if error:
-        return error
-    stored, _name = uploaded
-    old_key = doc.file_key
-    doc.file_key, doc.size, doc.content_type = (
-        stored.key,
-        stored.size,
-        stored.content_type,
-    )
-    try:
-        store.remove(old_key)
-    except store.FileNotFound:
-        pass
+    if doc.thumb_key:
+        # A photo stays a photo: re-encoded without EXIF, with a new
+        # thumbnail, never raw bytes behind an old thumbnail.
+        error = _replace_photo(doc)
+        if error:
+            return error
+    else:
+        uploaded, error = _upload()
+        if error:
+            return error
+        stored, _name = uploaded
+        old_key = doc.file_key
+        doc.file_key, doc.size, doc.content_type = (
+            stored.key,
+            stored.size,
+            stored.content_type,
+        )
+        try:
+            store.remove(old_key)
+        except store.FileNotFound:
+            pass
     log_audit(_actor(acc), "documents.file.replace", "DocumentFile", doc.id, doc.name)
     db.session.commit()
     return jsonify(_file_dict(doc, acc)), 200
+
+
+def _replace_photo(doc: DocumentFile):
+    from . import images
+
+    if (refused := storage_full()) is not None:
+        return refused
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return api_error("VALIDATION_ERROR", "file is required", 400)
+    try:
+        full, kind, thumb, width, height = images.process(upload.read())
+        big = store.put(OWNER, full, kind)
+        small = store.put(OWNER, thumb, kind)
+    except images.BadImage:
+        return api_error("VALIDATION_ERROR", "not a JPEG, PNG, WebP or GIF photo", 400)
+    except store.FileTooLarge as err:
+        return api_error("FILE_TOO_LARGE", str(err), 413)
+    except store.FileStoreError:
+        return api_error("FILE_STORE_UNAVAILABLE", "the file store is not reachable", 503)
+    _drop_files(doc)
+    doc.file_key, doc.thumb_key, doc.size, doc.content_type = big.key, small.key, big.size, kind
+    doc.width, doc.height = width, height
+    return None
 
 
 @documents_bp.patch("/files/<int:file_id>")
@@ -557,7 +641,9 @@ def update_file(file_id: int):
     if "folderId" in body:
         target = body.get("folderId")
         if target is not None and (
-            not isinstance(target, int) or not acc.can_open(target)
+            not isinstance(target, int)
+            or isinstance(target, bool)
+            or not acc.can_open(target)
         ):
             return api_error("VALIDATION_ERROR", "folderId: no such folder", 400)
         doc.folder_id = target

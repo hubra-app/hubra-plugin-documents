@@ -23,7 +23,17 @@ from hubra.core.utils import log_audit
 
 from . import images
 from .models import DocumentFile, DocumentFolder, DocumentPhotoOptout, DocumentPhotoTag
-from .routes import OWNER, Access, _actor, _file_dict, _folder_dict, _visible_file, documents_bp
+from .routes import (
+    OWNER,
+    Access,
+    _actor,
+    _clean_name,
+    _file_dict,
+    _folder_dict,
+    _visible_file,
+    documents_bp,
+    storage_full,
+)
 
 MAX_PHOTOS = 20
 
@@ -107,7 +117,9 @@ def upload_photos(folder_id: int):
     if folder is None or not acc.can_open(folder_id) or folder.kind != "album":
         return api_error("NOT_FOUND", "no such album", 404)
     if not acc.may_upload(folder):
-        return api_error("FORBIDDEN", "only the board adds photos here", 403)
+        return api_error("FORBIDDEN", "you may not add photos to this album", 403)
+    if (refused := storage_full()) is not None:
+        return refused
     uploads = request.files.getlist("photos")
     if not uploads:
         return api_error("VALIDATION_ERROR", "photos is required", 400)
@@ -115,7 +127,7 @@ def upload_photos(folder_id: int):
         return api_error("VALIDATION_ERROR", f"at most {MAX_PHOTOS} photos at once", 400)
     made, failed = [], []
     for f in uploads:
-        name = (f.filename or "photo")[:120]
+        name = _clean_name(f.filename, 120) or "photo"
         try:
             full, kind, thumb, width, height = images.process(f.read())
             big = store.put(OWNER, full, kind)
@@ -168,9 +180,15 @@ def photo_thumb(file_id: int):
         return api_error("NOT_FOUND", "the photo is missing from the store", 404)
     except store.FileStoreError:
         return api_error("FILE_STORE_UNAVAILABLE", "the file store is not reachable", 503)
-    resp = send_file(io.BytesIO(data), mimetype=doc.content_type, max_age=86400)
+    # The type from the bytes, not the stored one: a thumbnail is only ever
+    # an image, whatever the file's content type says.
+    kind = images.sniff(data)
+    if kind is None:
+        return api_error("NOT_FOUND", "no such photo", 404)
+    resp = send_file(io.BytesIO(data), mimetype=kind, max_age=86400)
     resp.headers["Cache-Control"] = "private, max-age=86400"
     resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
     return resp
 
 
@@ -222,7 +240,11 @@ def set_tags(file_id: int):
     if not acc.may_change(doc):
         return api_error("FORBIDDEN", "only the uploader or a folder manager", 403)
     raw = (request.get_json(silent=True) or {}).get("memberIds")
-    if not isinstance(raw, list) or not all(isinstance(v, int) for v in raw) or len(raw) > 100:
+    if (
+        not isinstance(raw, list)
+        or not all(isinstance(v, int) and not isinstance(v, bool) for v in raw)
+        or len(raw) > 100
+    ):
         return api_error("VALIDATION_ERROR", "memberIds: a list of member ids", 400)
     wanted = set(raw)
     if opted_out(wanted):
