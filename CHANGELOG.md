@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Photos: deleting a photo is red text at the left of the dialog, like other dialogs.
 - **Photo albums (Fotos).** Albums move here from the Community plugin. An album is a folder of the kind *album*, with the same access per role and group as any folder. The new *Fotos* view next to the documents (`/app/documents?view=photos`) shows the albums and their photos in a grid. Photos are re-encoded without EXIF and get thumbnails; each has a caption and a cover choice. Members can be tagged on a photo, untag themselves, or turn off *Fotos von mir*. An album may let every member who can see it add photos.
 - The albums from Community are taken over by the job `documents-take-over-albums` through Community's contracts (`community.albums.export`, `community.photos.optouts`). Photos are copied in the file store, with captions, tags, covers and opt-outs. Each album is taken once.
 - New clubs: the Mitglied role gets *Ansehen*, so members see the folders open to everyone and the albums. Existing clubs give members access under Einstellungen › Rollen if they should see the photos.
