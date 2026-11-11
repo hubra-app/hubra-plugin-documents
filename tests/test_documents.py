@@ -241,3 +241,18 @@ def test_recent_widget(client, db, lib):
     # Rita may not open Finanzen: the budget stays hidden.
     rita = contracts.widget_data("documents.recent", {}, actor=member("rita@test.ch"))
     assert [i["label"] for i in rita["items"]] == ["Statuten.pdf"]
+
+
+def test_search_treats_percent_and_underscore_as_letters(client, lib):
+    _login(client, "admin@test.ch")
+    _upload(client, name="Budget_2026.pdf")
+    _upload(client, name="Budgetx2026.pdf")
+    got = [f["name"] for f in client.get(f"{BASE}/files?q=budget_").get_json()]
+    assert got == ["Budget_2026.pdf"]
+    assert client.get(f"{BASE}/files?q=%25").get_json() == []
+
+
+def test_access_lists_take_ids_not_booleans(client, lib):
+    _login(client, "admin@test.ch")
+    res = client.post(f"{BASE}/folders", json={"name": "X", "roleIds": [True]})
+    assert res.status_code == 400

@@ -129,3 +129,55 @@ def test_community_albums_move_in(client, app, db, club):
     got = client.get(f"{BASE}/folders/{folder.id}").get_json()
     assert [t["memberId"] for t in got["files"][0]["tags"]] == [club["max"]]
     assert client.get(f"{BASE}/files/{doc.id}/download?inline=1").status_code == 200
+
+
+def _album(client):
+    _login(client, "admin@test.ch")
+    return client.post(f"{BASE}/folders", json={"kind": "album", "name": "Fest"}).get_json()
+
+
+def test_a_huge_photo_is_refused_before_it_is_decoded(client, club):
+    from PIL import Image
+
+    from hubra_documents import images
+
+    # A tiny PNG that claims more pixels than allowed.
+    buf = io.BytesIO()
+    Image.new("1", (8000, 8000)).save(buf, "PNG")
+    assert 8000 * 8000 > images.MAX_PIXELS and len(buf.getvalue()) < 100_000
+    with pytest.raises(images.BadImage):
+        images.process(buf.getvalue())
+    assert Image.MAX_IMAGE_PIXELS != images.MAX_PIXELS  # Pillow's global stays as it was
+
+
+def test_a_photo_keeps_its_name_clean_and_its_thumb_an_image(client, club):
+    album = _album(client)
+    form = {"photos": [(io.BytesIO(_png()), "../a\tb.png", "image/png")]}
+    res = client.post(
+        f"{BASE}/folders/{album['id']}/photos", data=form, content_type="multipart/form-data"
+    )
+    photo = res.get_json()["added"][0]
+    assert "\t" not in photo["name"] and "/" not in photo["name"]
+    assert client.get(f"{BASE}/files/{photo['id']}/download").status_code == 200
+
+    # A new version of a photo is a photo again: re-encoded, new thumbnail.
+    form = {"file": (io.BytesIO(b"<script>alert(1)</script>"), "x.html", "text/html")}
+    assert client.put(
+        f"{BASE}/files/{photo['id']}/content", data=form, content_type="multipart/form-data"
+    ).status_code == 400
+    form = {"file": (io.BytesIO(_png((0, 0, 255))), "y.png", "text/html")}
+    res = client.put(
+        f"{BASE}/files/{photo['id']}/content", data=form, content_type="multipart/form-data"
+    )
+    assert res.status_code == 200 and res.get_json()["contentType"] == "image/jpeg"
+    thumb = client.get(f"{BASE}/files/{photo['id']}/thumb")
+    assert thumb.mimetype == "image/jpeg"
+    assert "sandbox" in thumb.headers["Content-Security-Policy"]
+
+
+def test_tags_take_member_ids_not_booleans(client, club):
+    album = _album(client)
+    photo = _photos(client, album["id"], _png()).get_json()["added"][0]
+    assert client.put(
+        f"{BASE}/files/{photo['id']}/tags", json={"memberIds": [True]}
+    ).status_code == 400
