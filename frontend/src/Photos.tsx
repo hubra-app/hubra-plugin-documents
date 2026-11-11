@@ -314,7 +314,7 @@ function PhotoModal({
               </Button>
             )}
             {photo.canChange && (
-              <Button variant="light" color="red" onClick={() => setConfirm(true)}>
+              <Button variant="subtle" color="red" onClick={() => setConfirm(true)}>
                 {t('documents.delete')}
               </Button>
             )}
