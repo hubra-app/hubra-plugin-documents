@@ -35,7 +35,9 @@ def club(client, app, db, seeded_db, tmp_path):
     app.config["FILES_DIR"] = str(tmp_path)
     app.test_cli_runner().invoke(args=["sync-permissions"])
     tier = seeded_db["tier"]
-    max_ = _make_role_and_member(db, tier, name="Max", permission_keys=["documents.files.read"])
+    max_ = _make_role_and_member(
+        db, tier, name="Max", permission_keys=["documents.files.read", "documents.photos.add"]
+    )
     lea = _make_role_and_member(db, tier, name="Lea", permission_keys=["documents.files.read"])
     return {"max": max_.id, "lea": lea.id}
 
@@ -50,7 +52,11 @@ def test_an_album_with_photos_tags_and_consent(client, db, club):
     )
     assert client.post(f"{BASE}/folders", json={"name": "x", "kind": "zoo"}).status_code == 400
 
-    # Any reader adds photos to an album that lets members do so.
+    # Lea may only look: adding photos takes documents.photos.add.
+    _login(client, "lea@test.ch")
+    assert _photos(client, album["id"], _png()).status_code == 403
+
+    # A reader with documents.photos.add adds photos to an album that lets members do so.
     _login(client, "max@test.ch")
     res = _photos(client, album["id"], _png(), b"not a photo")
     assert res.status_code == 201
@@ -181,3 +187,29 @@ def test_tags_take_member_ids_not_booleans(client, club):
     assert client.put(
         f"{BASE}/files/{photo['id']}/tags", json={"memberIds": [True]}
     ).status_code == 400
+
+
+def test_uploads_stop_when_the_storage_is_full(client, club, monkeypatch):
+    from types import SimpleNamespace
+
+    from hubra.core.services import quotas
+
+    from hubra_documents import routes
+
+    album = _album(client)
+    monkeypatch.setattr(routes, "_tenant", lambda: SimpleNamespace(id=7))
+    monkeypatch.setattr(quotas, "limits_for", lambda t: {"storage_mb": 100})
+    monkeypatch.setattr(quotas, "usage", lambda ts: {7: {"storage_mb": 99}})
+    assert _photos(client, album["id"], _png()).status_code == 201
+
+    monkeypatch.setattr(quotas, "usage", lambda ts: {7: {"storage_mb": 100}})
+    res = _photos(client, album["id"], _png())
+    assert res.status_code == 507 and "STORAGE_FULL" in res.get_data(as_text=True)
+    form = {"file": (io.BytesIO(b"x"), "a.txt", "text/plain")}
+    assert client.post(
+        f"{BASE}/files", data=form, content_type="multipart/form-data"
+    ).status_code == 507
+
+    # No limit: no stop.
+    monkeypatch.setattr(quotas, "limits_for", lambda t: {"storage_mb": None})
+    assert _photos(client, album["id"], _png()).status_code == 201

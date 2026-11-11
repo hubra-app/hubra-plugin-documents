@@ -105,7 +105,7 @@
         "consentOff": "Your tags were removed and nobody can tag you",
         "takenOn": "Date",
         "membersUpload": "Members may add photos",
-        "membersUploadHint": "Everyone who sees the album, not only those who may upload documents."
+        "membersUploadHint": "Everyone who sees the album and has the right Add photos to albums, not only those who may upload documents."
       }
     }
   },
@@ -215,7 +215,7 @@
         "consentOff": "Deine Markierungen sind entfernt, niemand kann dich markieren",
         "takenOn": "Datum",
         "membersUpload": "Mitglieder dürfen Fotos hinzufügen",
-        "membersUploadHint": "Alle, die das Album sehen, nicht nur wer Dokumente hochladen darf."
+        "membersUploadHint": "Alle, die das Album sehen und das Recht Fotos zu Alben hinzufügen haben, nicht nur wer Dokumente hochladen darf."
       }
     }
   }

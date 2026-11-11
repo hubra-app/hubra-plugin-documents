@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **New right *Fotos zu Alben hinzufügen*** (`documents.photos.add`): an album that lets members add photos now takes this right (or the right to upload documents), not only the right to see documents. It is an *Bearbeiten* right, so Mitglied doesn't get it by default: give it to the roles that should add photos under Einstellungen › Rollen, then run `flask sync-permissions`.
+- **Storage limit:** uploads (files, new versions, photos) stop with *STORAGE_FULL* while the club is at or over its storage limit (`storage_mb`, plan or club's own). No limit, no stop.
 - Security: photos with more than 60 million pixels are refused before they are decoded; a new version of a photo is re-encoded with a new thumbnail; thumbnails are served as the image they are; photo names are cleaned like file names; `%` and `_` in the search match themselves.
 - Photos: deleting a photo is red text at the left of the dialog, like other dialogs.
 - **Photo albums (Fotos).** Albums move here from the Community plugin. An album is a folder of the kind *album*, with the same access per role and group as any folder. The new *Fotos* view next to the documents (`/app/documents?view=photos`) shows the albums and their photos in a grid. Photos are re-encoded without EXIF and get thumbnails; each has a caption and a cover choice. Members can be tagged on a photo, untag themselves, or turn off *Fotos von mir*. An album may let every member who can see it add photos.

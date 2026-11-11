@@ -29,6 +29,7 @@ PUT    /photo-consent               {allowed}: "no" removes my tags
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 
@@ -47,9 +48,13 @@ from hubra.core.models.role import Role
 from .models import DocumentFile, DocumentFolder
 
 documents_bp = Blueprint("documents_bp", __name__)
+log = logging.getLogger(__name__)
 
 OWNER = "documents"
 MANAGE = "documents.folders.manage"
+# Adds photos to an album that lets members do so ("membersUpload"), without
+# the right to upload documents. An "edit" right: roles get it on purpose.
+ADD_PHOTOS = "documents.photos.add"
 # Shown in the browser only these; anything else (HTML, SVG …) downloads.
 INLINE_TYPES = {
     "application/pdf",
@@ -73,6 +78,7 @@ class Access:
         self.writer = self.manager or member_has_permission(
             self.member, "documents.files.write"
         )
+        self.photo_adder = self.writer or member_has_permission(self.member, ADD_PHOTOS)
         self.role_ids = {r.id for r in (self.member.roles if self.member else [])}
         self.group_ids = (
             set(
@@ -106,13 +112,18 @@ class Access:
         return self._open[folder_id]
 
     def may_upload(self, folder: DocumentFolder | None) -> bool:
-        """Writers anywhere they can open; every reader into an album that
-        lets members add photos."""
+        """Writers anywhere they can open; holders of documents.photos.add
+        into an album that lets members add photos."""
         if folder is not None and not self.can_open(folder.id):
             return False
         if self.writer:
             return True
-        return bool(folder is not None and folder.kind == "album" and folder.members_upload)
+        return bool(
+            self.photo_adder
+            and folder is not None
+            and folder.kind == "album"
+            and folder.members_upload
+        )
 
     def may_change(self, doc: DocumentFile) -> bool:
         if self.manager:
@@ -120,7 +131,9 @@ class Access:
         if not (self.member and doc.uploaded_by == self.member.id):
             return False
         folder = self.folders.get(doc.folder_id) if doc.folder_id else None
-        return self.writer or bool(folder and folder.kind == "album" and folder.members_upload)
+        return self.writer or bool(
+            self.photo_adder and folder and folder.kind == "album" and folder.members_upload
+        )
 
 
 def _folder_dict(f: DocumentFolder, counts: dict[int, int] | None = None) -> dict:
@@ -263,7 +276,42 @@ def _folder_fields(body: dict, folder: DocumentFolder | None, acc: Access):
     return target
 
 
+def _tenant():
+    from hubra.core.tenant.context import current_tenant
+
+    return current_tenant()
+
+
+def storage_full():
+    """An error response while the club is at or over its storage limit
+    (``storage_mb``: plan or club's own; none means no limit), else None.
+    The limit is soft elsewhere; here it stops new files."""
+    from hubra.core.services import quotas
+
+    tenant = _tenant()
+    if tenant is None:
+        return None
+    try:
+        limit = quotas.limits_for(tenant).get("storage_mb")
+        if not limit:
+            return None
+        used = quotas.usage([tenant])[tenant.id]["storage_mb"]
+    except Exception:  # noqa: BLE001 - a failed count never blocks uploads
+        log.warning("documents: storage usage unavailable", exc_info=True)
+        return None
+    if used < limit:
+        return None
+    return api_error(
+        "STORAGE_FULL",
+        f"the club's storage is full ({used} of {limit} MB); delete files or ask "
+        "the club's owners to raise the limit",
+        507,
+    )
+
+
 def _upload():
+    if (full := storage_full()) is not None:
+        return None, full
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         return None, api_error("VALIDATION_ERROR", "file is required", 400)
@@ -552,6 +600,8 @@ def replace_file(file_id: int):
 def _replace_photo(doc: DocumentFile):
     from . import images
 
+    if (refused := storage_full()) is not None:
+        return refused
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         return api_error("VALIDATION_ERROR", "file is required", 400)

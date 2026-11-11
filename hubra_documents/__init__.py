@@ -15,6 +15,10 @@ Permissions:
     documents.files.read     see the library (the folders open to them)
     documents.files.write    upload, and rename or delete their own files
     documents.folders.manage folders and their access, every file, every folder
+    documents.photos.add     add photos to albums that let members do so,
+                             without the right to upload documents
+
+Uploads stop while the club is over its storage limit (storage_mb).
 """
 
 from hubra.core.contracts import WidgetField, widget_contract
@@ -30,6 +34,8 @@ module = Module(
     description="Document library with folders and access per role or group",
     default_enabled=False,
     depends_on=("members",),
+    # Checked by the album routes themselves (hubra_documents/photos.py).
+    permissions=(("documents.photos.add", "Add photos to albums"),),
     blueprints=(
         Blueprint(
             "hubra_documents.routes",

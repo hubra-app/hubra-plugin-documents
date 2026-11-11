@@ -32,6 +32,7 @@ from .routes import (
     _folder_dict,
     _visible_file,
     documents_bp,
+    storage_full,
 )
 
 MAX_PHOTOS = 20
@@ -116,7 +117,9 @@ def upload_photos(folder_id: int):
     if folder is None or not acc.can_open(folder_id) or folder.kind != "album":
         return api_error("NOT_FOUND", "no such album", 404)
     if not acc.may_upload(folder):
-        return api_error("FORBIDDEN", "only the board adds photos here", 403)
+        return api_error("FORBIDDEN", "you may not add photos to this album", 403)
+    if (refused := storage_full()) is not None:
+        return refused
     uploads = request.files.getlist("photos")
     if not uploads:
         return api_error("VALIDATION_ERROR", "photos is required", 400)
