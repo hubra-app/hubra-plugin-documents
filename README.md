@@ -1,5 +1,7 @@
 # Hubra plugin: Documents
 
+[![Test and release](https://github.com/hubra-app/hubra-plugin-documents/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/hubra-app/hubra-plugin-documents/actions/workflows/release.yml?query=branch%3Amain) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-bitsandbricks-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bitsandbricks)
+
 The club's document library for [Hubra](https://hubra.club): folders, uploads
 and access per role or group.
 
