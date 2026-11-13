@@ -1,6 +1,6 @@
 # Documents
 
-## Unreleased
+## 1.2.0
 
 - **New right *Fotos zu Alben hinzufügen*** (`documents.photos.add`): an album that lets members add photos now takes this right (or the right to upload documents), not only the right to see documents. It is an *Bearbeiten* right, so Mitglied doesn't get it by default: give it to the roles that should add photos under Einstellungen › Rollen, then run `flask sync-permissions`.
 - **Storage limit:** uploads (files, new versions, photos) stop with *STORAGE_FULL* while the club is at or over its storage limit (`storage_mb`, plan or club's own). No limit, no stop.
