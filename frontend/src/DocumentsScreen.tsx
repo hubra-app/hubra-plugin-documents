@@ -40,13 +40,14 @@ import {
 } from '@tabler/icons-react'
 import {
   ConfirmModal,
+  DateField,
   EmptyState,
   ErrorBanner,
   Field,
+  formatDateTime,
   LoadingSpinner,
   Modal,
   PageHead,
-  formatDateTime,
   useT,
   useToast,
 } from '@hubra/plugin-sdk'
@@ -703,11 +704,10 @@ function FolderModal({
       />
       {album ? (
         <>
-          <TextInput
-            type="date"
+          <DateField
             label={t('documents.photos.takenOn')}
             value={takenOn}
-            onChange={(e) => setTakenOn(e.currentTarget.value)}
+            onChange={setTakenOn}
           />
           <Switch
             checked={membersUpload}
